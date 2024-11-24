@@ -1,6 +1,8 @@
 import { Driver, MarkerData } from "@/types/type";
+import { lineString as makeLineString } from "@turf/helpers";
+import length from "@turf/length";
 
-const directionsAPI = process.env.EXPO_PUBLIC_DIRECTIONS_API_KEY;
+const MAPBOX_ACCESS_TOKEN = process.env.EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN;
 
 export const generateMarkersFromData = ({
   data,
@@ -12,8 +14,8 @@ export const generateMarkersFromData = ({
   userLongitude: number;
 }): MarkerData[] => {
   return data.map((driver) => {
-    const latOffset = (Math.random() - 0.5) * 0.01; // Random offset between -0.005 and 0.005
-    const lngOffset = (Math.random() - 0.5) * 0.01; // Random offset between -0.005 and 0.005
+    const latOffset = (Math.random() - 0.5) * 0.01;
+    const lngOffset = (Math.random() - 0.5) * 0.01;
 
     return {
       latitude: userLatitude + latOffset,
@@ -39,8 +41,7 @@ export const calculateRegion = ({
     return {
       latitude: 37.78825,
       longitude: -122.4324,
-      latitudeDelta: 0.01,
-      longitudeDelta: 0.01,
+      zoom: 13,
     };
   }
 
@@ -48,8 +49,7 @@ export const calculateRegion = ({
     return {
       latitude: userLatitude,
       longitude: userLongitude,
-      latitudeDelta: 0.01,
-      longitudeDelta: 0.01,
+      zoom: 13,
     };
   }
 
@@ -58,17 +58,19 @@ export const calculateRegion = ({
   const minLng = Math.min(userLongitude, destinationLongitude);
   const maxLng = Math.max(userLongitude, destinationLongitude);
 
-  const latitudeDelta = (maxLat - minLat) * 1.3; // Adding some padding
-  const longitudeDelta = (maxLng - minLng) * 1.3; // Adding some padding
-
   const latitude = (userLatitude + destinationLatitude) / 2;
   const longitude = (userLongitude + destinationLongitude) / 2;
+
+  // Calculate appropriate zoom level
+  const latDiff = maxLat - minLat;
+  const lngDiff = maxLng - minLng;
+  const maxDiff = Math.max(latDiff, lngDiff);
+  const zoom = Math.floor(14 - Math.log2(maxDiff * 111)); // 111 km per degree of latitude
 
   return {
     latitude,
     longitude,
-    latitudeDelta,
-    longitudeDelta,
+    zoom,
   };
 };
 
@@ -95,18 +97,21 @@ export const calculateDriverTimes = async ({
 
   try {
     const timesPromises = markers.map(async (marker) => {
-      const responseToUser = await fetch(
-        `https://maps.googleapis.com/maps/api/directions/json?origin=${marker.latitude},${marker.longitude}&destination=${userLatitude},${userLongitude}&key=${directionsAPI}`,
-      );
-      const dataToUser = await responseToUser.json();
-      const timeToUser = dataToUser.routes[0].legs[0].duration.value; // Time in seconds
+      const routeToUser = makeLineString([
+        [marker.longitude, marker.latitude],
+        [userLongitude, userLatitude],
+      ]);
+      const distanceToUser = length(routeToUser, { units: "kilometers" });
+      const timeToUser = (distanceToUser / 40) * 3600; // Assuming average speed of 40 km/h
 
-      const responseToDestination = await fetch(
-        `https://maps.googleapis.com/maps/api/directions/json?origin=${userLatitude},${userLongitude}&destination=${destinationLatitude},${destinationLongitude}&key=${directionsAPI}`,
-      );
-      const dataToDestination = await responseToDestination.json();
-      const timeToDestination =
-        dataToDestination.routes[0].legs[0].duration.value; // Time in seconds
+      const routeToDestination = makeLineString([
+        [userLongitude, userLatitude],
+        [destinationLongitude, destinationLatitude],
+      ]);
+      const distanceToDestination = length(routeToDestination, {
+        units: "kilometers",
+      });
+      const timeToDestination = (distanceToDestination / 40) * 3600; // Assuming average speed of 40 km/h
 
       const totalTime = (timeToUser + timeToDestination) / 60; // Total time in minutes
       const price = (totalTime * 0.5).toFixed(2); // Calculate price based on time

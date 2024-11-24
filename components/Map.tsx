@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { ActivityIndicator, Text, View } from "react-native";
-import MapView, { Marker, PROVIDER_DEFAULT } from "react-native-maps";
-import MapViewDirections from "react-native-maps-directions";
+import Mapbox from "@rnmapbox/maps";
+import { lineString as makeLineString } from "@turf/helpers";
 
 import { icons } from "@/constants";
 import { useFetch } from "@/lib/fetch";
@@ -13,9 +13,16 @@ import {
 import { useDriverStore, useLocationStore } from "@/store";
 import { Driver, MarkerData } from "@/types/type";
 
-const directionsAPI = process.env.EXPO_PUBLIC_DIRECTIONS_API_KEY;
-
 const Map = () => {
+  useEffect(() => {
+    const token = process.env.EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN;
+    if (token) {
+      Mapbox.setAccessToken(token);
+    } else {
+      console.error("Mapbox access token is not set");
+    }
+  }, []);
+
   const {
     userLongitude,
     userLatitude,
@@ -57,14 +64,14 @@ const Map = () => {
         setDrivers(drivers as MarkerData[]);
       });
     }
-  }, [markers, destinationLatitude, destinationLongitude]);
-
-  const region = calculateRegion({
-    userLatitude,
-    userLongitude,
+  }, [
+    markers,
     destinationLatitude,
     destinationLongitude,
-  });
+    setDrivers,
+    userLatitude,
+    userLongitude,
+  ]);
 
   if (loading || (!userLatitude && !userLongitude))
     return (
@@ -80,58 +87,64 @@ const Map = () => {
       </View>
     );
 
+  const route =
+    destinationLatitude && destinationLongitude && userLatitude && userLongitude
+      ? makeLineString([
+          [userLongitude, userLatitude],
+          [destinationLongitude, destinationLatitude],
+        ])
+      : null;
+
   return (
-    <MapView
-      provider={PROVIDER_DEFAULT}
+    <Mapbox.MapView
+      styleURL={Mapbox.StyleURL.Street}
       className="w-full h-full rounded-2xl"
-      tintColor="black"
-      mapType="mutedStandard"
-      showsPointsOfInterest={false}
-      initialRegion={region}
-      showsUserLocation={true}
-      userInterfaceStyle="light"
+      zoomLevel={14}
+      centerCoordinate={[userLongitude || 0, userLatitude || 0]}
     >
-      {markers.map((marker, index) => (
-        <Marker
+      <Mapbox.Camera
+        zoomLevel={14}
+        centerCoordinate={[userLongitude || 0, userLatitude || 0]}
+        animationMode="flyTo"
+        animationDuration={0}
+      />
+
+      {markers.map((marker) => (
+        <Mapbox.PointAnnotation
           key={marker.id}
-          coordinate={{
-            latitude: marker.latitude,
-            longitude: marker.longitude,
-          }}
+          id={`marker-${marker.id}`}
+          coordinate={[marker.longitude, marker.latitude]}
           title={marker.title}
-          image={
-            selectedDriver === +marker.id ? icons.selectedMarker : icons.marker
-          }
-        />
+        >
+          <Mapbox.Callout title={marker.title} />
+        </Mapbox.PointAnnotation>
       ))}
 
       {destinationLatitude && destinationLongitude && (
         <>
-          <Marker
+          <Mapbox.PointAnnotation
             key="destination"
-            coordinate={{
-              latitude: destinationLatitude,
-              longitude: destinationLongitude,
-            }}
+            id="destination"
+            coordinate={[destinationLongitude, destinationLatitude]}
             title="Destination"
-            image={icons.pin}
-          />
-          <MapViewDirections
-            origin={{
-              latitude: userLatitude!,
-              longitude: userLongitude!,
-            }}
-            destination={{
-              latitude: destinationLatitude,
-              longitude: destinationLongitude,
-            }}
-            apikey={directionsAPI!}
-            strokeColor="#0286FF"
-            strokeWidth={2}
-          />
+          >
+            <Mapbox.Callout title="Destination" />
+          </Mapbox.PointAnnotation>
+
+          {route && (
+            <Mapbox.ShapeSource id="routeSource" shape={route}>
+              <Mapbox.LineLayer
+                id="routeFill"
+                style={{
+                  lineColor: "#0286FF",
+                  lineWidth: 2,
+                }}
+              />
+            </Mapbox.ShapeSource>
+          )}
         </>
       )}
-    </MapView>
+    </Mapbox.MapView>
   );
 };
 
